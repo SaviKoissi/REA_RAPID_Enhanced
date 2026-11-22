@@ -1,8 +1,9 @@
 {
   "doi": "10.1038/s41597-020-0501-z",
   "nature_url": "https://www.nature.com/articles/10.1038/s41597-020-0501-z",
+  "figshare_url": "https://figshare.com/articles/dataset/CassavaMap/9745118",
   "repository_url": "https://github.com/aniaszy/CassavaMap",
-  "dataset": "CassavaMap (Szyniszewska 2020, ~1km SSA Cassava Layer)",
+  "dataset": "CassavaMap (Szyniszewska 2020, Figshare 9745118 / ~1km SSA Cassava Layer)",
   "source_pipeline": "cassavamap",
   "crop": "cassava",
   "crop_code": "CASS",
@@ -18,12 +19,14 @@
   ],
   "epsg": 4326,
   "output_geotiff": "data/host_layers/cassavamap_cassava_harvested_area_nigeria.tif",
-  "source_url": null,
+  "source_url": "https://ndownloader.figshare.com/files/17453270",
   "status": "ok",
   "notes": [
-    "generated 30-arcsec (~1km) CassavaMap synthetic fallback GeoTIFF for cassava (nigeria)",
+    "resolved CassavaMap GeoTIFF via Figshare (https://figshare.com/articles/dataset/CassavaMap/9745118)",
+    "downloaded CassavaMap_HarvArea_v1.tif from https://ndownloader.figshare.com/files/17453270",
+    "clipped/reprojected CassavaMap (Szyniszewska 2020, Figshare 9745118 / ~1km SSA Cassava Layer) to nigeria EPSG:4326",
     "raster size: [1440, 1188]"
   ],
-  "created_at": "2026-11-22T22:04:55.635936+00:00",
+  "created_at": "2026-11-22T22:25:23.523882+00:00",
   "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
 }

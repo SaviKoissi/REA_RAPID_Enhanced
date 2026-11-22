@@ -2,11 +2,16 @@
 """
 Baseline host-crop layer ingestion for RAPID WAVE.
 
-Defaults to CassavaMap (Szyniszewska 2020, Nature Scientific Data
-DOI: 10.1038/s41597-020-0501-z, https://github.com/aniaszy/CassavaMap) for
-cassava (CBSD), and MapSPAM 2010 v2.0 (doi:10.7910/DVN/PRFF8V) for Musa spp.
-(banana/plantain, BBTD). Clips and reprojects rasters to the target regional
-grid via GDAL CLI.
+Source priority for cassava (CBSD):
+  1. Figshare CassavaMap dataset (https://figshare.com/articles/dataset/CassavaMap/9745118,
+     Szyniszewska 2020, Nature Scientific Data DOI: 10.1038/s41597-020-0501-z)
+  2. GitHub CassavaMap repository (https://github.com/aniaszy/CassavaMap)
+  3. Harvard Dataverse MapSPAM 2010 v2.0 (doi:10.7910/DVN/PRFF8V)
+  4. Local 30-arcsec (~1km) GDAL synthetic fallback
+
+Source priority for Musa spp. (banana/plantain, BBTD):
+  1. Harvard Dataverse MapSPAM 2010 v2.0 (doi:10.7910/DVN/PRFF8V)
+  2. Local 5-arcmin (~10km) GDAL synthetic fallback
 """
 
 from __future__ import annotations
@@ -26,8 +31,11 @@ import requests
 
 DOI = "10.1038/s41597-020-0501-z"
 NATURE_URL = f"https://www.nature.com/articles/{DOI}"
+CASSAVAMAP_FIGSHARE_ID = "9745118"
+CASSAVAMAP_FIGSHARE_URL = f"https://figshare.com/articles/dataset/CassavaMap/{CASSAVAMAP_FIGSHARE_ID}"
+CASSAVAMAP_FIGSHARE_API = f"https://api.figshare.com/v2/articles/{CASSAVAMAP_FIGSHARE_ID}"
 CASSAVAMAP_REPO = "https://github.com/aniaszy/CassavaMap"
-CASSAVAMAP_API = "https://api.github.com/repos/aniaszy/CassavaMap"
+CASSAVAMAP_GITHUB_API = "https://api.github.com/repos/aniaszy/CassavaMap"
 DATAVERSE_DOI = "doi:10.7910/DVN/PRFF8V"
 
 SPAM_CROPS = {
@@ -103,6 +111,7 @@ def warp_to_grid(
         "-te", str(west), str(south), str(east), str(north),
         "-r", resampling,
         "-dstnodata", "0",
+        "-co", "COMPRESS=LZW",
         "-of", "GTiff",
         str(src),
         str(dst),
@@ -124,7 +133,7 @@ def translate_info(src: Path) -> Optional[dict]:
 def download_file(url: str, out: Path) -> bool:
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with requests.get(url, stream=True, timeout=120) as r:
+        with requests.get(url, stream=True, timeout=180) as r:
             r.raise_for_status()
             with open(out, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
@@ -136,15 +145,47 @@ def download_file(url: str, out: Path) -> bool:
         return False
 
 
-def discover_cassavamap_url(variable: str) -> Optional[tuple[str, str]]:
+def discover_figshare_cassavamap_url(variable: str) -> Optional[tuple[str, str]]:
     """
-    Query https://github.com/aniaszy/CassavaMap releases and repository tree
-    for CassavaMap raster assets (GeoTIFF / zip) published under DOI 10.1038/s41597-020-0501-z.
+    Primary default: Query Figshare article 9745118
+    (https://figshare.com/articles/dataset/CassavaMap/9745118) for published GeoTIFFs.
     """
+    var_hints = {
+        "production": ["prod", "ton"],
+        "harvested_area": ["harv", "area", "ha"],
+        "physical_area": ["phys", "area", "ha"],
+        "yield": ["yield"],
+    }.get(variable, ["harv", "prod"])
+
+    try:
+        r = requests.get(CASSAVAMAP_FIGSHARE_API, timeout=20)
+        if not r.ok:
+            return None
+        files = r.json().get("files", [])
+        rasters = [
+            f for f in files
+            if f.get("name", "").lower().endswith((".tif", ".tiff", ".zip")) and f.get("download_url")
+        ]
+        if not rasters:
+            return None
+        # Prefer direct GeoTIFFs over zips, then match variable hint
+        tifs = [f for f in rasters if f["name"].lower().endswith((".tif", ".tiff"))]
+        pool = tifs if tifs else rasters
+        chosen = next(
+            (f for f in pool if any(h in f["name"].lower() for h in var_hints)),
+            pool[0],
+        )
+        return chosen["name"], chosen["download_url"]
+    except Exception as exc:
+        print(f"[warn] Figshare CassavaMap (9745118) lookup failed: {exc}", file=sys.stderr)
+    return None
+
+
+def discover_github_cassavamap_url(variable: str) -> Optional[tuple[str, str]]:
+    """Secondary fallback: Query https://github.com/aniaszy/CassavaMap releases and tree."""
     var_hint = "prod" if variable == "production" else "harv"
     try:
-        # 1. Check GitHub Releases first
-        rel = requests.get(f"{CASSAVAMAP_API}/releases", timeout=15)
+        rel = requests.get(f"{CASSAVAMAP_GITHUB_API}/releases", timeout=15)
         if rel.ok:
             for release in rel.json():
                 for asset in release.get("assets", []):
@@ -153,15 +194,14 @@ def discover_cassavamap_url(variable: str) -> Optional[tuple[str, str]]:
                         if var_hint in name.lower() or "cassava" in name.lower():
                             return name, asset["browser_download_url"]
 
-        # 2. Check repository tree (main / master)
         for branch in ("main", "master"):
-            tree = requests.get(f"{CASSAVAMAP_API}/git/trees/{branch}?recursive=1", timeout=15)
+            tree = requests.get(f"{CASSAVAMAP_GITHUB_API}/git/trees/{branch}?recursive=1", timeout=15)
             if tree.ok:
-                candidates = []
-                for item in tree.json().get("tree", []):
-                    path = item.get("path", "")
-                    if path.lower().endswith((".tif", ".tiff", ".zip")):
-                        candidates.append(path)
+                candidates = [
+                    item.get("path", "")
+                    for item in tree.json().get("tree", [])
+                    if item.get("path", "").lower().endswith((".tif", ".tiff", ".zip"))
+                ]
                 if candidates:
                     chosen = next((p for p in candidates if var_hint in p.lower()), candidates[0])
                     raw_url = f"https://raw.githubusercontent.com/aniaszy/CassavaMap/{branch}/{chosen}"
@@ -203,7 +243,7 @@ def discover_dataverse_url(crop: str, variable: str) -> Optional[tuple[str, str]
 def generate_synthetic_geotiff(out_tif: Path, bounds: list[float], epsg: int, high_res: bool = False) -> bool:
     """Create a synthetic host raster via gdal_translate (30-arcsec ~1km for CassavaMap, 5-arcmin for SPAM)."""
     west, south, east, north = bounds
-    cellsize = (0.5 / 60.0) if high_res else (5.0 / 60.0)  # ~1km for CassavaMap vs ~10km for SPAM
+    cellsize = (0.5 / 60.0) if high_res else (5.0 / 60.0)
     ncols = max(10, int(round((east - west) / cellsize)))
     nrows = max(10, int(round((north - south) / cellsize)))
 
@@ -249,10 +289,9 @@ def ingest(
     crop_code = SPAM_CROPS[crop]
     var_code, var_label = SPAM_VARIABLES[variable]
 
-    # Default to CassavaMap for cassava unless explicitly overridden
     resolved_source = "cassavamap" if (source == "auto" and crop == "cassava") else ("mapspam" if source == "auto" else source)
     dataset_label = (
-        "CassavaMap (Szyniszewska 2020, ~1km SSA Cassava Layer)"
+        "CassavaMap (Szyniszewska 2020, Figshare 9745118 / ~1km SSA Cassava Layer)"
         if resolved_source == "cassavamap"
         else "SPAM 2010 v2.0 (Spatial Production Allocation Model)"
     )
@@ -280,11 +319,25 @@ def ingest(
 
     source_url: Optional[str] = None
     status = "failed"
-    discovered = (
-        discover_cassavamap_url(variable)
-        if resolved_source == "cassavamap"
-        else discover_dataverse_url(crop, variable)
-    )
+    discovered: Optional[tuple[str, str]] = None
+
+    if resolved_source == "cassavamap":
+        # 1. Primary default: Figshare CassavaMap dataset (9745118)
+        discovered = discover_figshare_cassavamap_url(variable)
+        if discovered:
+            notes.append(f"resolved CassavaMap GeoTIFF via Figshare ({CASSAVAMAP_FIGSHARE_URL})")
+        else:
+            # 2. Secondary: GitHub aniaszy/CassavaMap
+            discovered = discover_github_cassavamap_url(variable)
+            if discovered:
+                notes.append(f"resolved CassavaMap asset via GitHub ({CASSAVAMAP_REPO})")
+            else:
+                # 3. Tertiary: Harvard Dataverse MapSPAM CASS
+                discovered = discover_dataverse_url(crop, variable)
+                if discovered:
+                    notes.append(f"fell back to MapSPAM Dataverse ({DATAVERSE_DOI})")
+    else:
+        discovered = discover_dataverse_url(crop, variable)
 
     if discovered:
         fname, url = discovered
@@ -351,6 +404,7 @@ def _write_manifest(
     manifest = {
         "doi": DOI,
         "nature_url": NATURE_URL,
+        "figshare_url": CASSAVAMAP_FIGSHARE_URL if resolved_source == "cassavamap" else None,
         "repository_url": CASSAVAMAP_REPO if resolved_source == "cassavamap" else f"https://doi.org/{DATAVERSE_DOI.replace('doi:', '')}",
         "dataset": dataset_label,
         "source_pipeline": resolved_source,
@@ -375,12 +429,11 @@ def _write_manifest(
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Ingest CassavaMap / SPAM host-crop rasters for RAPID WAVE.")
+    parser = argparse.ArgumentParser(description="Ingest CassavaMap (Figshare 9745118 / GitHub) & MapSPAM host-crop rasters.")
     parser.add_argument("--crop", choices=sorted(SPAM_CROPS), default="cassava")
     parser.add_argument("--region", choices=sorted(REGIONS), default="nigeria")
     parser.add_argument("--variable", choices=sorted(SPAM_VARIABLES), default="harvested_area")
-    parser.add_argument("--source", choices=["auto", "cassavamap", "mapspam"], default="auto",
-                        help="Raster source (default: auto -> CassavaMap for cassava, MapSPAM for banana/plantain)")
+    parser.add_argument("--source", choices=["auto", "cassavamap", "mapspam"], default="auto")
     parser.add_argument("--out-dir", default="data/host_layers")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-fallback", action="store_true")
