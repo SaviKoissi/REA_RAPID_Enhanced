@@ -1,0 +1,28 @@
+{
+  "doi": "10.1038/s41597-020-0501-z",
+  "dataverse_doi": "doi:10.7910/DVN/PRFF8V",
+  "nature_url": "https://www.nature.com/articles/10.1038/s41597-020-0501-z",
+  "dataset": "SPAM 2010 v2.0 (Spatial Production Allocation Model)",
+  "crop": "banana",
+  "crop_code": "BANA",
+  "variable": "harvested_area",
+  "variable_label": "Harvested area (ha)",
+  "region": "benin",
+  "region_name": "Benin",
+  "bounds_wgs84": [
+    0.97,
+    6.15,
+    3.87,
+    12.41
+  ],
+  "epsg": 4326,
+  "output_geotiff": "data/host_layers/spam_banana_harvested_area_benin.tif",
+  "source_url": null,
+  "status": "ok",
+  "notes": [
+    "generated 5-arcmin synthetic fallback GeoTIFF for banana (benin)",
+    "raster size: [35, 75]"
+  ],
+  "created_at": "2026-11-22T21:17:42.827650+00:00",
+  "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
+}

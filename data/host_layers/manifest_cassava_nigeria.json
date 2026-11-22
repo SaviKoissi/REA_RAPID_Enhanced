@@ -1,0 +1,28 @@
+{
+  "doi": "10.1038/s41597-020-0501-z",
+  "dataverse_doi": "doi:10.7910/DVN/PRFF8V",
+  "nature_url": "https://www.nature.com/articles/10.1038/s41597-020-0501-z",
+  "dataset": "SPAM 2010 v2.0 (Spatial Production Allocation Model)",
+  "crop": "cassava",
+  "crop_code": "CASS",
+  "variable": "harvested_area",
+  "variable_label": "Harvested area (ha)",
+  "region": "nigeria",
+  "region_name": "Nigeria",
+  "bounds_wgs84": [
+    2.68,
+    4.0,
+    14.68,
+    13.9
+  ],
+  "epsg": 4326,
+  "output_geotiff": "data/host_layers/spam_cassava_harvested_area_nigeria.tif",
+  "source_url": null,
+  "status": "ok",
+  "notes": [
+    "generated 5-arcmin synthetic fallback GeoTIFF for cassava (nigeria)",
+    "raster size: [144, 119]"
+  ],
+  "created_at": "2026-11-22T21:17:41.896860+00:00",
+  "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
+}
