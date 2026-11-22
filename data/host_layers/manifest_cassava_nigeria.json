@@ -1,8 +1,9 @@
 {
   "doi": "10.1038/s41597-020-0501-z",
-  "dataverse_doi": "doi:10.7910/DVN/PRFF8V",
   "nature_url": "https://www.nature.com/articles/10.1038/s41597-020-0501-z",
-  "dataset": "SPAM 2010 v2.0 (Spatial Production Allocation Model)",
+  "repository_url": "https://github.com/aniaszy/CassavaMap",
+  "dataset": "CassavaMap (Szyniszewska 2020, ~1km SSA Cassava Layer)",
+  "source_pipeline": "cassavamap",
   "crop": "cassava",
   "crop_code": "CASS",
   "variable": "harvested_area",
@@ -16,13 +17,13 @@
     13.9
   ],
   "epsg": 4326,
-  "output_geotiff": "data/host_layers/spam_cassava_harvested_area_nigeria.tif",
+  "output_geotiff": "data/host_layers/cassavamap_cassava_harvested_area_nigeria.tif",
   "source_url": null,
   "status": "ok",
   "notes": [
-    "generated 5-arcmin synthetic fallback GeoTIFF for cassava (nigeria)",
-    "raster size: [144, 119]"
+    "generated 30-arcsec (~1km) CassavaMap synthetic fallback GeoTIFF for cassava (nigeria)",
+    "raster size: [1440, 1188]"
   ],
-  "created_at": "2026-11-22T21:17:41.896860+00:00",
+  "created_at": "2026-11-22T22:04:55.635936+00:00",
   "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
 }

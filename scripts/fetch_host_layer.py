@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-SPAM host-crop layer ingestion for RAPID WAVE.
+Baseline host-crop layer ingestion for RAPID WAVE.
 
-Downloads Spatial Production Allocation Model (SPAM 2010 v2.0) rasters from
-Harvard Dataverse (doi:10.7910/DVN/PRFF8V), published in Nature Scientific Data
-(DOI: 10.1038/s41597-020-0501-z), clips/reprojects them via GDAL CLI, and
-writes a baseline host-density GeoTIFF (Phase 1/2 background layer).
+Defaults to CassavaMap (Szyniszewska 2020, Nature Scientific Data
+DOI: 10.1038/s41597-020-0501-z, https://github.com/aniaszy/CassavaMap) for
+cassava (CBSD), and MapSPAM 2010 v2.0 (doi:10.7910/DVN/PRFF8V) for Musa spp.
+(banana/plantain, BBTD). Clips and reprojects rasters to the target regional
+grid via GDAL CLI.
 """
 
 from __future__ import annotations
@@ -24,17 +25,17 @@ from typing import Optional
 import requests
 
 DOI = "10.1038/s41597-020-0501-z"
-DATAVERSE_DOI = "doi:10.7910/DVN/PRFF8V"
 NATURE_URL = f"https://www.nature.com/articles/{DOI}"
+CASSAVAMAP_REPO = "https://github.com/aniaszy/CassavaMap"
+CASSAVAMAP_API = "https://api.github.com/repos/aniaszy/CassavaMap"
+DATAVERSE_DOI = "doi:10.7910/DVN/PRFF8V"
 
-# Official MapSPAM 4-letter crop codes
 SPAM_CROPS = {
     "cassava": "CASS",
     "banana": "BANA",
     "plantain": "PLNT",
 }
 
-# Official MapSPAM variable prefixes
 SPAM_VARIABLES = {
     "harvested_area": ("H", "Harvested area (ha)"),
     "physical_area": ("A", "Physical area (ha)"),
@@ -65,6 +66,7 @@ MANIFEST_NAME = "manifest.json"
 
 @dataclass
 class IngestionResult:
+    dataset: str
     crop: str
     variable: str
     region: str
@@ -134,6 +136,41 @@ def download_file(url: str, out: Path) -> bool:
         return False
 
 
+def discover_cassavamap_url(variable: str) -> Optional[tuple[str, str]]:
+    """
+    Query https://github.com/aniaszy/CassavaMap releases and repository tree
+    for CassavaMap raster assets (GeoTIFF / zip) published under DOI 10.1038/s41597-020-0501-z.
+    """
+    var_hint = "prod" if variable == "production" else "harv"
+    try:
+        # 1. Check GitHub Releases first
+        rel = requests.get(f"{CASSAVAMAP_API}/releases", timeout=15)
+        if rel.ok:
+            for release in rel.json():
+                for asset in release.get("assets", []):
+                    name = asset.get("name", "")
+                    if name.lower().endswith((".tif", ".tiff", ".zip")):
+                        if var_hint in name.lower() or "cassava" in name.lower():
+                            return name, asset["browser_download_url"]
+
+        # 2. Check repository tree (main / master)
+        for branch in ("main", "master"):
+            tree = requests.get(f"{CASSAVAMAP_API}/git/trees/{branch}?recursive=1", timeout=15)
+            if tree.ok:
+                candidates = []
+                for item in tree.json().get("tree", []):
+                    path = item.get("path", "")
+                    if path.lower().endswith((".tif", ".tiff", ".zip")):
+                        candidates.append(path)
+                if candidates:
+                    chosen = next((p for p in candidates if var_hint in p.lower()), candidates[0])
+                    raw_url = f"https://raw.githubusercontent.com/aniaszy/CassavaMap/{branch}/{chosen}"
+                    return Path(chosen).name, raw_url
+    except Exception as exc:
+        print(f"[warn] CassavaMap GitHub lookup failed: {exc}", file=sys.stderr)
+    return None
+
+
 def discover_dataverse_url(crop: str, variable: str) -> Optional[tuple[str, str]]:
     """Query Harvard Dataverse API for MapSPAM 2010 v2.0 (doi:10.7910/DVN/PRFF8V)."""
     var_code, _ = SPAM_VARIABLES[variable]
@@ -146,7 +183,6 @@ def discover_dataverse_url(crop: str, variable: str) -> Optional[tuple[str, str]
         if not r.ok:
             return None
         files = r.json().get("data", {}).get("latestVersion", {}).get("files", [])
-        # Look for global variable zip (e.g. spam2010v2r0_global_harv_area.geotiff.zip)
         var_hints = {
             "H": ["harv_area", "_h_"],
             "A": ["phys_area", "_a_"],
@@ -164,10 +200,10 @@ def discover_dataverse_url(crop: str, variable: str) -> Optional[tuple[str, str]
     return None
 
 
-def generate_synthetic_geotiff(out_tif: Path, bounds: list[float], epsg: int) -> bool:
-    """Create a realistic 5-arcminute (0.0833 deg) synthetic host raster via gdal_translate."""
+def generate_synthetic_geotiff(out_tif: Path, bounds: list[float], epsg: int, high_res: bool = False) -> bool:
+    """Create a synthetic host raster via gdal_translate (30-arcsec ~1km for CassavaMap, 5-arcmin for SPAM)."""
     west, south, east, north = bounds
-    cellsize = 5.0 / 60.0
+    cellsize = (0.5 / 60.0) if high_res else (5.0 / 60.0)  # ~1km for CassavaMap vs ~10km for SPAM
     ncols = max(10, int(round((east - west) / cellsize)))
     nrows = max(10, int(round((north - south) / cellsize)))
 
@@ -185,15 +221,14 @@ def generate_synthetic_geotiff(out_tif: Path, bounds: list[float], epsg: int) ->
         row_vals = []
         for c in range(ncols):
             lon = west + (c + 0.5) * cellsize
-            # Higher host density in humid southern/central agricultural belts
             lat_factor = max(0.05, math.exp(-((lat - (south + 0.35 * (north - south))) ** 2) / 12.0))
             wave = 0.65 + 0.35 * math.sin(lon * 1.4) * math.cos(lat * 1.6)
-            ha = round(max(0.0, 420.0 * lat_factor * wave), 2)
+            ha = round(max(0.0, (42.0 if high_res else 420.0) * lat_factor * wave), 2)
             row_vals.append(f"{ha:.2f}")
         lines.append(" ".join(row_vals))
 
     asc_path.write_text("\n".join(lines) + "\n")
-    res = _run(["gdal_translate", "-a_srs", f"EPSG:{epsg}", "-of", "GTiff", str(asc_path), str(out_tif)])
+    res = _run(["gdal_translate", "-a_srs", f"EPSG:{epsg}", "-co", "COMPRESS=LZW", "-of", "GTiff", str(asc_path), str(out_tif)])
     asc_path.unlink(missing_ok=True)
     return res.returncode == 0
 
@@ -203,6 +238,7 @@ def ingest(
     region: str,
     variable: str,
     out_dir: Path,
+    source: str = "auto",
     force: bool = False,
     synthetic_fallback: bool = True,
 ) -> IngestionResult:
@@ -213,43 +249,57 @@ def ingest(
     crop_code = SPAM_CROPS[crop]
     var_code, var_label = SPAM_VARIABLES[variable]
 
+    # Default to CassavaMap for cassava unless explicitly overridden
+    resolved_source = "cassavamap" if (source == "auto" and crop == "cassava") else ("mapspam" if source == "auto" else source)
+    dataset_label = (
+        "CassavaMap (Szyniszewska 2020, ~1km SSA Cassava Layer)"
+        if resolved_source == "cassavamap"
+        else "SPAM 2010 v2.0 (Spatial Production Allocation Model)"
+    )
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_tif = out_dir / f"spam_{crop}_{variable}_{region}.tif"
+    prefix = "cassavamap" if resolved_source == "cassavamap" else "spam"
+    out_tif = out_dir / f"{prefix}_{crop}_{variable}_{region}.tif"
 
     if out_tif.exists() and not force:
         notes.append(f"output already exists (use --force to overwrite): {out_tif}")
         return IngestionResult(
-            crop=crop, variable=variable, region=region, source_url=None,
+            dataset=dataset_label, crop=crop, variable=variable, region=region, source_url=None,
             output_geotiff=str(out_tif), bounds_wgs84=bounds, epsg=epsg,
             created_at=datetime.now(timezone.utc).isoformat(), status="ok", notes=notes,
         )
 
     if not gdal_available():
         notes.append("GDAL CLI (gdal_translate/gdalwarp) not found on PATH.")
-        _write_manifest(out_dir, crop, variable, var_label, region, bounds, epsg, None, "failed", notes, None)
+        _write_manifest(out_dir, dataset_label, resolved_source, crop, variable, var_label, region, bounds, epsg, None, "failed", notes, None)
         return IngestionResult(
-            crop=crop, variable=variable, region=region, source_url=None,
+            dataset=dataset_label, crop=crop, variable=variable, region=region, source_url=None,
             output_geotiff=None, bounds_wgs84=bounds, epsg=epsg,
             created_at=datetime.now(timezone.utc).isoformat(), status="failed", notes=notes,
         )
 
     source_url: Optional[str] = None
     status = "failed"
-    discovered = discover_dataverse_url(crop, variable)
+    discovered = (
+        discover_cassavamap_url(variable)
+        if resolved_source == "cassavamap"
+        else discover_dataverse_url(crop, variable)
+    )
 
     if discovered:
         fname, url = discovered
         source_url = url
-        dl_path = out_dir / f"_spam_{fname}"
+        dl_path = out_dir / f"_{prefix}_{fname}"
         if download_file(url, dl_path):
-            notes.append(f"downloaded {fname} from Harvard Dataverse ({DATAVERSE_DOI})")
+            notes.append(f"downloaded {fname} from {url}")
             work_raster: Optional[Path] = None
             if dl_path.suffix.lower() == ".zip":
-                extract_dir = out_dir / "_spam_extract"
+                extract_dir = out_dir / f"_{prefix}_extract"
                 extract_dir.mkdir(exist_ok=True)
                 with zipfile.ZipFile(dl_path) as zf:
-                    matches = [m for m in zf.namelist() if f"_{var_code}_{crop_code}_A.tif" in m.upper()]
-                    target = matches[0] if matches else next((m for m in zf.namelist() if crop_code in m.upper() and m.lower().endswith(".tif")), None)
+                    tifs = [m for m in zf.namelist() if m.lower().endswith((".tif", ".tiff"))]
+                    matches = [m for m in tifs if f"_{var_code}_{crop_code}_A.tif" in m.upper()]
+                    target = matches[0] if matches else (tifs[0] if tifs else None)
                     if target:
                         zf.extract(target, extract_dir)
                         work_raster = extract_dir / target
@@ -260,22 +310,24 @@ def ingest(
                 ok, err = warp_to_grid(work_raster, out_tif, bounds, epsg)
                 if ok:
                     status = "ok"
-                    notes.append(f"clipped/reprojected {crop_code} ({var_code}) to {region} EPSG:{epsg}")
+                    notes.append(f"clipped/reprojected {dataset_label} to {region} EPSG:{epsg}")
                 else:
                     notes.append(f"gdalwarp failed: {err.strip()[:200]}")
 
     if status != "ok" and synthetic_fallback:
-        if generate_synthetic_geotiff(out_tif, bounds, epsg):
+        is_cassavamap = resolved_source == "cassavamap"
+        if generate_synthetic_geotiff(out_tif, bounds, epsg, high_res=is_cassavamap):
             status = "ok"
-            notes.append(f"generated 5-arcmin synthetic fallback GeoTIFF for {crop} ({region})")
+            res_tag = "30-arcsec (~1km) CassavaMap" if is_cassavamap else "5-arcmin (~10km) SPAM"
+            notes.append(f"generated {res_tag} synthetic fallback GeoTIFF for {crop} ({region})")
 
     info = translate_info(out_tif) if status == "ok" else None
     if info:
         notes.append(f"raster size: {info.get('size')}")
 
-    _write_manifest(out_dir, crop, variable, var_label, region, bounds, epsg, source_url, status, notes, out_tif)
+    _write_manifest(out_dir, dataset_label, resolved_source, crop, variable, var_label, region, bounds, epsg, source_url, status, notes, out_tif)
     return IngestionResult(
-        crop=crop, variable=variable, region=region, source_url=source_url,
+        dataset=dataset_label, crop=crop, variable=variable, region=region, source_url=source_url,
         output_geotiff=str(out_tif) if status == "ok" else None, bounds_wgs84=bounds, epsg=epsg,
         created_at=datetime.now(timezone.utc).isoformat(), status=status, notes=notes,
     )
@@ -283,6 +335,8 @@ def ingest(
 
 def _write_manifest(
     out_dir: Path,
+    dataset_label: str,
+    resolved_source: str,
     crop: str,
     variable: str,
     var_label: str,
@@ -296,9 +350,10 @@ def _write_manifest(
 ) -> None:
     manifest = {
         "doi": DOI,
-        "dataverse_doi": DATAVERSE_DOI,
         "nature_url": NATURE_URL,
-        "dataset": "SPAM 2010 v2.0 (Spatial Production Allocation Model)",
+        "repository_url": CASSAVAMAP_REPO if resolved_source == "cassavamap" else f"https://doi.org/{DATAVERSE_DOI.replace('doi:', '')}",
+        "dataset": dataset_label,
+        "source_pipeline": resolved_source,
         "crop": crop,
         "crop_code": SPAM_CROPS[crop],
         "variable": variable,
@@ -320,18 +375,20 @@ def _write_manifest(
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Ingest SPAM host-crop rasters for RAPID WAVE.")
+    parser = argparse.ArgumentParser(description="Ingest CassavaMap / SPAM host-crop rasters for RAPID WAVE.")
     parser.add_argument("--crop", choices=sorted(SPAM_CROPS), default="cassava")
     parser.add_argument("--region", choices=sorted(REGIONS), default="nigeria")
     parser.add_argument("--variable", choices=sorted(SPAM_VARIABLES), default="harvested_area")
+    parser.add_argument("--source", choices=["auto", "cassavamap", "mapspam"], default="auto",
+                        help="Raster source (default: auto -> CassavaMap for cassava, MapSPAM for banana/plantain)")
     parser.add_argument("--out-dir", default="data/host_layers")
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--no-fallback", action="store_true", help="Disable synthetic raster fallback if Dataverse fails")
+    parser.add_argument("--no-fallback", action="store_true")
     args = parser.parse_args(argv)
 
     result = ingest(
         args.crop, args.region, args.variable, Path(args.out_dir),
-        force=args.force, synthetic_fallback=not args.no_fallback,
+        source=args.source, force=args.force, synthetic_fallback=not args.no_fallback,
     )
     return 0 if result.status == "ok" else 1
 

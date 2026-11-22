@@ -1,8 +1,9 @@
 {
   "doi": "10.1038/s41597-020-0501-z",
-  "dataverse_doi": "doi:10.7910/DVN/PRFF8V",
   "nature_url": "https://www.nature.com/articles/10.1038/s41597-020-0501-z",
+  "repository_url": "https://doi.org/10.7910/DVN/PRFF8V",
   "dataset": "SPAM 2010 v2.0 (Spatial Production Allocation Model)",
+  "source_pipeline": "mapspam",
   "crop": "banana",
   "crop_code": "BANA",
   "variable": "harvested_area",
@@ -20,9 +21,9 @@
   "source_url": null,
   "status": "ok",
   "notes": [
-    "generated 5-arcmin synthetic fallback GeoTIFF for banana (benin)",
+    "generated 5-arcmin (~10km) SPAM synthetic fallback GeoTIFF for banana (benin)",
     "raster size: [35, 75]"
   ],
-  "created_at": "2026-11-22T21:17:42.827650+00:00",
+  "created_at": "2026-11-22T22:04:56.842412+00:00",
   "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
 }
