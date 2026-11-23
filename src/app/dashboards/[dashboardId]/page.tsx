@@ -20,6 +20,20 @@ import type {
 import { useParams } from "next/navigation"
 import { BarChart3, ShieldAlert, Layers, Play, MapPin } from "lucide-react"
 
+function safeUUID(): string {
+  try {
+    if (typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+
 export const dynamic = "force-dynamic"
 
 const MapView = nextDynamic<MapViewProps>(() => import("@/components/map/map-view"), { ssr: false })
@@ -52,7 +66,7 @@ const SCEN: ScenarioComparison = compareScenarios([
 ])
 
 const buildDemo = (dashboardId: string): DashboardEntry => ({
-  key: dashboardId || `dashboard_demo_${crypto.randomUUID()}`,
+  key: dashboardId || `dashboard_demo_${safeUUID()}`,
   metadata: {
     name: "CBSD risk map",
     description:

@@ -27,6 +27,6 @@
     "clipped/reprojected CassavaMap (Szyniszewska 2020, Figshare 9745118 / ~1km SSA Cassava Layer) to nigeria EPSG:4326",
     "raster size: [1440, 1188]"
   ],
-  "created_at": "2026-11-22T22:25:23.523882+00:00",
+  "created_at": "2026-11-23T07:22:32.905962+00:00",
   "purpose": "Baseline susceptible host-density layer (Phase 1/2 background)."
 }

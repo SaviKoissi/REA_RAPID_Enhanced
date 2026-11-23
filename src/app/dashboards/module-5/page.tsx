@@ -16,7 +16,7 @@ import {
   runModule5Economics,
   DEFAULT_ECONOMIC_PARAMETERS,
 } from "@/lib/epi/module5_economics"
-import type { FieldRecord, GridNode, InterventionLevers } from "@/types"
+import type { FieldRecord, GridNode, InterventionLevers, EconomicParameters, ScenarioId } from "@/types"
 
 const CENTER: [number, number] = [9.08, 7.42]
 const BOUNDS: [[number, number], [number, number]] = [
@@ -84,30 +84,17 @@ export default function Module5Page() {
   const [months, setMonths] = useState(24)
   const [ensemble, setEnsemble] = useState(30)
 
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/observatory?orgId=org_wave_001")
-      .then((r) => r.json())
-      .then((data: FieldRecord[]) => {
-        if (cancelled) return
-        setRecords(data)
-        setLoading(false)
-        compute()
-      })
-      .catch(() => {
-        if (cancelled) return
-        setLoading(false)
-        compute()
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   const compute = useCallback(() => {
     const gridNodes = buildGridNodes(records)
+    const posteriorParameters = [
+      { name: "beta", priorMin: 0.01, priorMax: 0.5, posteriorMedian: 0.12, posteriorMean: 0.12, ciLower: 0.05, ciUpper: 0.25, ess: 150, samples: [], priorSamples: [], priorDensity: [], posteriorDensity: [] },
+      { name: "alpha", priorMin: 1, priorMax: 100, posteriorMedian: 25, posteriorMean: 25, ciLower: 10, ciUpper: 60, ess: 140, samples: [], priorSamples: [], priorDensity: [], posteriorDensity: [] },
+      { name: "sigmaInv", priorMin: 1, priorMax: 14, posteriorMedian: 7, posteriorMean: 7, ciLower: 4, ciUpper: 11, ess: 160, samples: [], priorSamples: [], priorDensity: [], posteriorDensity: [] },
+      { name: "vectorEfficiency", priorMin: 0.1, priorMax: 2, posteriorMedian: 1, posteriorMean: 1, ciLower: 0.5, ciUpper: 1.6, ess: 155, samples: [], priorSamples: [], priorDensity: [], posteriorDensity: [] },
+    ]
     const module4 = runModule4Forecast({
       gridNodes,
+      posteriorParameters,
       months,
       ensembleSize: ensemble,
       seed: 42,
@@ -131,6 +118,7 @@ export default function Module5Page() {
     altLevers.forEach((l, i) => {
       const alt = runModule4Forecast({
         gridNodes,
+        posteriorParameters,
         months,
         ensembleSize: ensemble,
         seed: 100 + i,
@@ -138,7 +126,7 @@ export default function Module5Page() {
       })
       const sc = alt.scenarios.find((s) => s.id === "management_interventions")
       if (sc) {
-        controlled.push({ id: `alt_${i}`, name: `Portfolio ${i + 2}`, levers: l, trajectory: sc.trajectories })
+        controlled.push({ id: `alt_${i}` as ScenarioId, name: `Portfolio ${i + 2}`, levers: l, trajectory: sc.trajectories })
       }
     })
 
@@ -152,8 +140,24 @@ export default function Module5Page() {
   }, [records, econ, months, ensemble])
 
   useEffect(() => {
-    compute()
-  }, [compute])
+    let cancelled = false
+    fetch("/api/observatory?orgId=org_wave_001")
+      .then((r) => r.json())
+      .then((data: FieldRecord[]) => {
+        if (cancelled) return
+        setRecords(data)
+        setLoading(false)
+        compute()
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLoading(false)
+        compute()
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const portfolios = result?.portfolios ?? []
   const pareto = result?.paretoFrontier ?? []
@@ -181,7 +185,7 @@ export default function Module5Page() {
             and marginal cost per hectare protected.
           </p>
         </div>
-        <Badge variant="outline" size="sm">
+        <Badge variant="outline">
           <PieChart size={14} className="mr-1.5" /> FAO
         </Badge>
       </div>
@@ -206,7 +210,7 @@ export default function Module5Page() {
                   value={String(econ[c.key])}
                   onChange={(e) => {
                     const v = Number(e.target.value)
-                    if (!Number.isNaN(v)) setEcon((prev) => ({ ...prev, [key]: v as any }))
+                    if (!Number.isNaN(v)) setEcon((prev) => ({ ...prev, [c.key]: v as EconomicParameters[keyof EconomicParameters] }))
                   }}
                 />
                 <div className="text-[9px] text-muted-foreground">{c.unit}</div>

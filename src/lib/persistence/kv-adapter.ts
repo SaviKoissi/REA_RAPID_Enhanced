@@ -1,5 +1,6 @@
 import { PersistenceAdapter } from "./adapter"
 import type {
+
   DashboardEntry,
   Phase,
   User,
@@ -8,12 +9,105 @@ import type {
   FileVersion,
   FieldRecord,
   FieldIngestionResult,
+  LayerRef,
+  PosteriorRef,
+  MapViewport,
+  ModelState,
 } from "@/types"
 
 const NOW = () => new Date().toISOString()
 
 function generateId(prefix = "id") {
-  return `${prefix}_${crypto.randomUUID()}`
+  return `${prefix}_${safeUUID()}`
+}
+
+/* Deterministic LCG for reproducible synthetic data. */
+let seedState = 20240601
+function lcg(): number {
+  seedState = (seedState * 1664525 + 1013904223) >>> 0
+  return seedState / 0xffffffff
+}
+function lcgRange(min: number, max: number): number {
+  return min + lcg() * (max - min)
+}
+
+function makeLayer(id: string, type: "raster" | "vector", name: string, visible = true, opacity = 0.6, url?: string): LayerRef {
+  return { id, type, name, visible, opacity, ...(url ? { url } : {}) }
+}
+
+function makePosterior(id: string, method: "ABC-SMC" | "Stan", artifactUrl: string): PosteriorRef {
+  return { id, method, artifactUrl, createdAt: NOW() }
+}
+
+function hostDensityCells(
+  center: [number, number],
+  count: number,
+  spread: number,
+  baseValue: number,
+): Array<{ lat: number; lon: number; value: number }> {
+  const cells: Array<{ lat: number; lon: number; value: number }> = []
+  for (let i = 0; i < count; i++) {
+    cells.push({
+      lat: center[0] + (lcg() - 0.5) * 2 * spread,
+      lon: center[1] + (lcg() - 0.5) * 2 * spread,
+      value: Math.max(0, baseValue + (lcg() - 0.5) * 0.6),
+    })
+  }
+  return cells
+}
+
+function surveyPoints(
+  center: [number, number],
+  nPositive: number,
+  nNegative: number,
+  startIso: string,
+  pathosystem: Pathosystem,
+): Array<{
+  id: string
+  lat: number
+  lon: number
+  positive: boolean
+  date: string
+  sampleId: string
+  hostCrop: import("@/types").HostCrop
+}> {
+  const points: Array<{
+    id: string
+    lat: number
+    lon: number
+    positive: boolean
+    date: string
+    sampleId: string
+    hostCrop: import("@/types").HostCrop
+  }> = []
+  const hostCrop: import("@/types").HostCrop =
+    pathosystem === "CBSD" ? "cassava" : "banana"
+  const base = new Date(startIso).getTime()
+  for (let i = 0; i < nPositive; i++) {
+    const d = new Date(base + i * 86400000 * 3).toISOString()
+    points.push({
+      id: `sp_${safeUUID()}`,
+      lat: center[0] + (lcg() - 0.5) * 0.4,
+      lon: center[1] + (lcg() - 0.5) * 0.4,
+      positive: true,
+      date: d,
+      sampleId: `${pathosystem}-POS-${String(i + 1).padStart(3, "0")}`,
+      hostCrop,
+    })
+  }
+  for (let i = 0; i < nNegative; i++) {
+    const d = new Date(base + i * 86400000 * 3).toISOString()
+    points.push({
+      id: `sp_${safeUUID()}`,
+      lat: center[0] + (lcg() - 0.5) * 0.8,
+      lon: center[1] + (lcg() - 0.5) * 0.8,
+      positive: false,
+      date: d,
+      sampleId: `${pathosystem}-NEG-${String(i + 1).padStart(3, "0")}`,
+      hostCrop,
+    })
+  }
+  return points
 }
 
 export class KVAdapter implements PersistenceAdapter {
@@ -66,26 +160,246 @@ export class KVAdapter implements PersistenceAdapter {
     })
 
     const now = NOW()
-    const phases: Array<{ phase: number; name: string; pathosystem: Pathosystem }> = [
-      { phase: 1, name: "CBSD initial detection", pathosystem: "CBSD" },
-      { phase: 2, name: "CBSD delimitation surveys", pathosystem: "CBSD" },
-      { phase: 3, name: "CBSD risk map", pathosystem: "CBSD" },
-      { phase: 4, name: "CBSD no intervention scenario", pathosystem: "CBSD" },
-      { phase: 5, name: "CBSD management interventions", pathosystem: "CBSD" },
-      { phase: 1, name: "BBTD delimiting surveys", pathosystem: "BBTD" },
-      { phase: 3, name: "BBTD Current spread", pathosystem: "BBTD" },
-      { phase: 4, name: "BBTD Future spread, no control", pathosystem: "BBTD" },
-      { phase: 5, name: "BBTD Future spread, controls", pathosystem: "BBTD" },
+
+    /* ---- Synthetic spatial layers per pathosystem ---- */
+    const cbsdCenter: [number, number] = [7.8, 9.0] // Nigeria
+    const bbtdCenter: [number, number] = [2.3, 7.2] // Benin
+
+    const cbsdHostCells = hostDensityCells(cbsdCenter, 60, 1.6, 0.55)
+    const bbtdHostCells = hostDensityCells(bbtdCenter, 45, 1.2, 0.5)
+
+    const cbsdPoints = surveyPoints(cbsdCenter, 8, 12, "2024-01-10", "CBSD")
+    const bbtdPoints = surveyPoints(bbtdCenter, 6, 10, "2024-02-01", "BBTD")
+
+    const cbsdRaster: LayerRef = makeLayer(
+      "cbsd_host_density",
+      "raster",
+      "CBSD host density (cassava, SPAM)",
+      true,
+      0.55,
+      "/rasters/cbsd_host_density.tif",
+    )
+    const bbtdRaster: LayerRef = makeLayer(
+      "bbtd_host_density",
+      "raster",
+      "BBTD host density (Musa, SPAM)",
+      true,
+      0.55,
+      "/rasters/bbtd_host_density.tif",
+    )
+
+    const cbsdSurvey: LayerRef = makeLayer(
+      "cbsd_surveys",
+      "vector",
+      "CBSD delimitation surveys",
+      true,
+      0.9,
+    )
+    const bbtdSurvey: LayerRef = makeLayer(
+      "bbtd_surveys",
+      "vector",
+      "BBTD delimiting surveys",
+      true,
+      0.9,
+    )
+
+    const cbsdRisk: LayerRef = makeLayer(
+      "cbsd_risk_contours",
+      "raster",
+      "CBSD ABC-SMC prevalence risk",
+      false,
+      0.5,
+      "/rasters/cbsd_risk.tif",
+    )
+    const bbtdSpread: LayerRef = makeLayer(
+      "bbtd_spread",
+      "raster",
+      "BBTD spread forecast",
+      false,
+      0.5,
+      "/rasters/bbtd_spread.tif",
+    )
+
+    const cbsdControls: LayerRef = makeLayer(
+      "cbsd_interventions",
+      "vector",
+      "CBSD management interventions",
+      false,
+      0.7,
+    )
+    const bbtdControls: LayerRef = makeLayer(
+      "bbtd_controls",
+      "vector",
+      "BBTD clean-seed/roguing controls",
+      false,
+      0.7,
+    )
+
+    const adminBounds: LayerRef = makeLayer(
+      "admin_boundaries",
+      "vector",
+      "Admin boundaries",
+      true,
+      0.3,
+      "/boundaries/west_africa_admin.geojson",
+    )
+
+    const phases: Array<{
+      phase: number
+      name: string
+      pathosystem: Pathosystem
+      center: [number, number]
+      zoom: number
+      layers: LayerRef[]
+      activeLayers: string[]
+      posteriors: PosteriorRef[]
+      uncertaintyCartography: ModelState["uncertaintyCartography"]
+      scenarioComparison: ModelState["scenarioComparison"]
+      points: Array<{
+        id: string
+        lat: number
+        lon: number
+        positive: boolean
+        date: string
+        sampleId: string
+        hostCrop: import("@/types").HostCrop
+      }>
+    }> = [
+      {
+        phase: 1,
+        name: "CBSD initial detection",
+        pathosystem: "CBSD",
+        center: cbsdCenter,
+        zoom: 6,
+        layers: [cbsdRaster, cbsdSurvey, adminBounds],
+        activeLayers: ["cbsd_host_density", "cbsd_surveys", "admin_boundaries"],
+        posteriors: [makePosterior("post_cbsd_1", "ABC-SMC", "/artifacts/cbsd_detection_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.9 },
+        scenarioComparison: { enabled: false, scenarioIds: [] },
+        points: cbsdPoints.slice(0, 8),
+      },
+      {
+        phase: 2,
+        name: "CBSD delimitation surveys",
+        pathosystem: "CBSD",
+        center: cbsdCenter,
+        zoom: 7,
+        layers: [cbsdRaster, cbsdSurvey, adminBounds],
+        activeLayers: ["cbsd_host_density", "cbsd_surveys", "admin_boundaries"],
+        posteriors: [makePosterior("post_cbsd_2", "ABC-SMC", "/artifacts/cbsd_delimitation_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.9 },
+        scenarioComparison: { enabled: false, scenarioIds: [] },
+        points: cbsdPoints,
+      },
+      {
+        phase: 3,
+        name: "CBSD risk map",
+        pathosystem: "CBSD",
+        center: cbsdCenter,
+        zoom: 6,
+        layers: [cbsdRaster, cbsdRisk, cbsdSurvey, adminBounds],
+        activeLayers: ["cbsd_host_density", "cbsd_risk_contours", "admin_boundaries"],
+        posteriors: [makePosterior("post_cbsd_3", "ABC-SMC", "/artifacts/cbsd_risk_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: { enabled: false, scenarioIds: [] },
+        points: cbsdPoints,
+      },
+      {
+        phase: 4,
+        name: "CBSD no intervention scenario",
+        pathosystem: "CBSD",
+        center: cbsdCenter,
+        zoom: 6,
+        layers: [cbsdRaster, cbsdRisk, adminBounds],
+        activeLayers: ["cbsd_host_density", "cbsd_risk_contours", "admin_boundaries"],
+        posteriors: [makePosterior("post_cbsd_4", "ABC-SMC", "/artifacts/cbsd_nocontrol_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: {
+          enabled: true,
+          scenarioIds: ["scen_cbsd_nocontrol", "scen_cbsd_controls"],
+        },
+        points: cbsdPoints,
+      },
+      {
+        phase: 5,
+        name: "CBSD management interventions",
+        pathosystem: "CBSD",
+        center: cbsdCenter,
+        zoom: 6,
+        layers: [cbsdRaster, cbsdControls, cbsdSurvey, adminBounds],
+        activeLayers: ["cbsd_host_density", "cbsd_interventions", "cbsd_surveys", "admin_boundaries"],
+        posteriors: [makePosterior("post_cbsd_5", "ABC-SMC", "/artifacts/cbsd_control_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: {
+          enabled: true,
+          scenarioIds: ["scen_cbsd_controls"],
+        },
+        points: cbsdPoints,
+      },
+      {
+        phase: 1,
+        name: "BBTD delimiting surveys",
+        pathosystem: "BBTD",
+        center: bbtdCenter,
+        zoom: 7,
+        layers: [bbtdRaster, bbtdSurvey, adminBounds],
+        activeLayers: ["bbtd_host_density", "bbtd_surveys", "admin_boundaries"],
+        posteriors: [makePosterior("post_bbtd_1", "ABC-SMC", "/artifacts/bbtd_delimiting_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.9 },
+        scenarioComparison: { enabled: false, scenarioIds: [] },
+        points: bbtdPoints.slice(0, 6),
+      },
+      {
+        phase: 3,
+        name: "BBTD Current spread",
+        pathosystem: "BBTD",
+        center: bbtdCenter,
+        zoom: 7,
+        layers: [bbtdRaster, bbtdSpread, bbtdSurvey, adminBounds],
+        activeLayers: ["bbtd_host_density", "bbtd_spread", "admin_boundaries"],
+        posteriors: [makePosterior("post_bbtd_3", "ABC-SMC", "/artifacts/bbtd_current_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: { enabled: false, scenarioIds: [] },
+        points: bbtdPoints,
+      },
+      {
+        phase: 4,
+        name: "BBTD Future spread, no control",
+        pathosystem: "BBTD",
+        center: bbtdCenter,
+        zoom: 7,
+        layers: [bbtdRaster, bbtdSpread, adminBounds],
+        activeLayers: ["bbtd_host_density", "bbtd_spread", "admin_boundaries"],
+        posteriors: [makePosterior("post_bbtd_4", "ABC-SMC", "/artifacts/bbtd_nocontrol_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: {
+          enabled: true,
+          scenarioIds: ["scen_bbtd_nocontrol", "scen_bbtd_controls"],
+        },
+        points: bbtdPoints,
+      },
+      {
+        phase: 5,
+        name: "BBTD Future spread, controls",
+        pathosystem: "BBTD",
+        center: bbtdCenter,
+        zoom: 7,
+        layers: [bbtdRaster, bbtdControls, bbtdSurvey, adminBounds],
+        activeLayers: ["bbtd_host_density", "bbtd_controls", "bbtd_surveys", "admin_boundaries"],
+        posteriors: [makePosterior("post_bbtd_5", "ABC-SMC", "/artifacts/bbtd_control_posterior.json")],
+        uncertaintyCartography: { enabled: true, method: "kriging", confidence: 0.95 },
+        scenarioComparison: { enabled: true, scenarioIds: ["scen_bbtd_controls"] },
+        points: bbtdPoints,
+      },
     ]
 
-    let counter = 0
     for (const p of phases) {
-      const key = `dashboard_${crypto.randomUUID()}`
+      const key = `dashboard_${safeUUID()}`
       const entry: DashboardEntry = {
         key,
         metadata: {
           name: p.name,
-          description: `Analytical view for ${p.name}`,
+          description: `Analytical view for ${p.name} — ${p.pathosystem}`,
           pathosystem: p.pathosystem,
           language: "en",
           phase: p.phase as Phase,
@@ -96,13 +410,13 @@ export class KVAdapter implements PersistenceAdapter {
           permissionLevel: "owner",
           userId,
         },
-        layers: [],
+        layers: p.layers,
         modelState: {
-          viewport: { center: [-1.5, -20], zoom: 4 },
-          activeLayers: [],
-          posteriors: [],
-          uncertaintyCartography: { enabled: false, method: "kriging", confidence: 0.95 },
-          scenarioComparison: { enabled: false, scenarioIds: [] },
+          viewport: { center: p.center, zoom: p.zoom },
+          activeLayers: p.activeLayers,
+          posteriors: p.posteriors,
+          uncertaintyCartography: p.uncertaintyCartography,
+          scenarioComparison: p.scenarioComparison,
         },
         createdAt: now,
         updatedAt: now,
@@ -110,7 +424,120 @@ export class KVAdapter implements PersistenceAdapter {
         orgId,
       }
       this.dashboards.set(key, entry)
-      counter++
+    }
+
+    /* ---- Pre-populate field observatory records ---- */
+    const allPoints = [...cbsdPoints, ...bbtdPoints]
+    allPoints.forEach((pt) => {
+      const orgIdPt = orgId
+      const rec: FieldRecord = {
+        sample_id: pt.sampleId,
+        latitude: pt.lat,
+        longitude: pt.lon,
+        date: pt.date,
+        host_crop: pt.hostCrop,
+        diagnostic_status: pt.positive ? "Infectious" : "Susceptible",
+        vector_density: Math.round(lcgRange(1, 40) * 10) / 10,
+        survey_effort: Math.round(lcgRange(10, 60)),
+        org_id: orgIdPt,
+        submitted_by: userId,
+        notes: `Synthetic ${pt.hostCrop === "cassava" ? "CBSD" : "BBTD"} survey record`,
+        geometry: { type: "Point", coordinates: [pt.lon, pt.lat] },
+      }
+      const list = this.observations.get(orgIdPt) ?? []
+      list.push(rec)
+      this.observations.set(orgIdPt, list)
+    })
+
+    /* ---- Pre-populate file artifacts ---- */
+    const fileMeta: Array<{
+      filename: string
+      mimeType: string
+      size: number
+      type: "csv" | "geojson" | "raster" | "posterior" | "stan"
+      metadata: Record<string, unknown>
+    }> = [
+      {
+        filename: "field_survey_q3_2024.csv",
+        mimeType: "text/csv",
+        size: 1_245_000,
+        type: "csv",
+        metadata: { records: 340, pathosystem: "CBSD", region: "Nigeria" },
+      },
+      {
+        filename: "delimitation_surveys.geojson",
+        mimeType: "application/geo+json",
+        size: 840_000,
+        type: "geojson",
+        metadata: { features: 210, pathosystem: "CBSD", region: "Nigeria" },
+      },
+      {
+        filename: "host_crop_raster_cassava.tif",
+        mimeType: "image/tiff",
+        size: 45_000_000,
+        type: "raster",
+        metadata: { variable: "harvested_area", source: "SPAM s41597-020-0501-z", region: "Nigeria" },
+      },
+      {
+        filename: "host_crop_raster_musa.tif",
+        mimeType: "image/tiff",
+        size: 38_000_000,
+        type: "raster",
+        metadata: { variable: "harvested_area", source: "SPAM s41597-020-0501-z", region: "Benin" },
+      },
+      {
+        filename: "abc_smc_posterior_cbsd.json",
+        mimeType: "application/json",
+        size: 2_100_000,
+        type: "posterior",
+        metadata: { method: "ABC-SMC", pathosystem: "CBSD", generations: 6 },
+      },
+      {
+        filename: "abc_smc_posterior_bbtd.json",
+        mimeType: "application/json",
+        size: 1_850_000,
+        type: "posterior",
+        metadata: { method: "ABC-SMC", pathosystem: "BBTD", generations: 5 },
+      },
+      {
+        filename: "stan_model_cbsd.stan",
+        mimeType: "text/plain",
+        size: 15_000,
+        type: "stan",
+        metadata: { model: "SEIR_spatial", pathosystem: "CBSD" },
+      },
+    ]
+    let fversion = 1
+    for (const fm of fileMeta) {
+      const fid = generateId("file")
+      const nowF = NOW()
+      const file: FileEntry = {
+        id: fid,
+        filename: fm.filename,
+        mimeType: fm.mimeType,
+        size: fm.size,
+        type: fm.type,
+        version: fversion,
+        latestVersionId: generateId("ver"),
+        uploadedBy: userId,
+        uploadedAt: nowF,
+        orgId,
+        metadata: fm.metadata,
+      }
+      this.files.set(fid, file)
+      const ver: FileVersion = {
+        id: file.latestVersionId,
+        fileId: fid,
+        version: fversion,
+        url: `/artifacts/${fm.filename}`,
+        checksum: `sha256_${safeUUID().slice(0, 12)}`,
+        uploadedAt: nowF,
+        uploadedBy: userId,
+        validated: true,
+        validationErrors: [],
+      }
+      this.versions.set(fid, [ver])
+      fversion++
     }
   }
 
@@ -124,7 +551,7 @@ export class KVAdapter implements PersistenceAdapter {
   }
 
   async createDashboard(entry: Omit<DashboardEntry, "key" | "createdAt" | "updatedAt">): Promise<DashboardEntry> {
-    const key = `dashboard_${crypto.randomUUID()}`
+    const key = `dashboard_${safeUUID()}`
     const now = NOW()
     const full: DashboardEntry = { ...entry, key, createdAt: now, updatedAt: now }
     this.dashboards.set(key, full)
@@ -283,6 +710,19 @@ export class KVAdapter implements PersistenceAdapter {
   async health(): Promise<boolean> {
     return true
   }
+}
+
+function safeUUID(): string {
+  try {
+    if (typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 type Pathosystem = "CBSD" | "BBTD"

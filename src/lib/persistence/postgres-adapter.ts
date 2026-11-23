@@ -11,9 +11,23 @@ import type {
 import { Pool } from "pg"
 import Redis from "ioredis"
 
+function safeUUID(): string {
+  try {
+    if (typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+
 const NOW = () => new Date().toISOString()
 function generateId(prefix = "id") {
-  return `${prefix}_${crypto.randomUUID()}`
+  return `${prefix}_${safeUUID()}`
 }
 
 export class PostgresAdapter implements PersistenceAdapter {
@@ -91,7 +105,7 @@ export class PostgresAdapter implements PersistenceAdapter {
   }
 
   async createDashboard(entry: Omit<DashboardEntry, "key" | "createdAt" | "updatedAt">): Promise<DashboardEntry> {
-    const key = `dashboard_${crypto.randomUUID()}`
+    const key = `dashboard_${safeUUID()}`
     const now = NOW()
     const full: DashboardEntry = { ...entry, key, createdAt: now, updatedAt: now }
     await this.pool.query(

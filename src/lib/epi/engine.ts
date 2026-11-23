@@ -1,5 +1,19 @@
 import type { ABCSMCResult, UncertaintyMap, ScenarioComparison } from "@/types"
 
+function safeUUID(): string {
+  try {
+    if (typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+
 interface ABCSMCParams {
   parameterNames: string[]
   priors: Array<{ min: number; max: number }>
@@ -201,7 +215,7 @@ export function computeUncertaintyMap(
   }
 
   return {
-    id: `unc_${crypto.randomUUID()}`,
+    id: `unc_${safeUUID()}`,
     mean,
     variance,
     confidenceInterval: { lower, upper },
@@ -234,7 +248,7 @@ export function compareScenarios(
   }
 
   return {
-    id: `scen_${crypto.randomUUID()}`,
+    id: `scen_${safeUUID()}`,
     name: "Scenario comparison",
     scenarioIds,
     metrics,
