@@ -1,5 +1,11 @@
 # RAPID WAVE Biosecurity Platform — Architecture & Implementation Notes
 
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Pathosystems](https://img.shields.io/badge/Pathosystems-CBSD%20%28Nigeria%29%20%7C%20BBTD%20%28Benin%29-2E7D32)](#3-seeded-analytical-views-cbsd-nigeria--bbtd-benin)
+[![Views](https://img.shields.io/badge/Analytical%20Views-9-0F766E)](#3-seeded-analytical-views-cbsd-nigeria--bbtd-benin)
+
 ## 1. Overview
 
 **RAPID WAVE** is a biosecurity analytics and surveillance web application built on **Next.js 16 (App Router, Turbopack)**, **React**, and **TypeScript**, paired with analytical and seeding workflows across five core capabilities:
