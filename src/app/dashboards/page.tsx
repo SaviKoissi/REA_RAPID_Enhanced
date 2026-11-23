@@ -12,7 +12,7 @@ export default function DashboardsPage() {
 
   useEffect(() => {
     fetch("/api/dashboards")
-      .then((r) => r.json())
+      .then(async (r) => { const txt = await r.text(); if (!r.ok || !txt) return []; try { const parsed = JSON.parse(txt); return Array.isArray(parsed) ? parsed : []; } catch { return []; } })
       .then((data: DashboardEntry[]) => setDashboards(data))
   }, [])
 

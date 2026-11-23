@@ -112,8 +112,8 @@ export default function DashboardDetailPage() {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/observatory?orgId=${encodeURIComponent(dashboard.orgId)}`)
-      .then((r) => r.json())
+    fetch(`/api/observatory?orgId=${encodeURIComponent((dashboard as any).orgId ?? (dashboard as any).permissions?.orgId ?? "org_wave_001")}`)
+      .then(async (r) => { const txt = await r.text(); if (!txt) return []; try { return JSON.parse(txt); } catch { return []; } })
       .then((data: FieldRecord[]) => {
         if (cancelled) return
         setMarkers(
