@@ -6,9 +6,17 @@ type LeafletMapModules = {
   L: typeof import("leaflet")
   MapContainer: typeof import("react-leaflet").MapContainer
   TileLayer: typeof import("react-leaflet").TileLayer
+  ImageOverlay: typeof import("react-leaflet").ImageOverlay
   Marker: typeof import("react-leaflet").Marker
   Popup: typeof import("react-leaflet").Popup
   CircleMarker: typeof import("react-leaflet").CircleMarker
+}
+
+export interface MapImageOverlay {
+  url: string
+  bounds: [[number, number], [number, number]]
+  opacity?: number
+  label?: string
 }
 
 export interface MapViewProps {
@@ -18,14 +26,15 @@ export interface MapViewProps {
   markers?: Array<{ position: [number, number]; label?: string; color?: string }>
   circles?: Array<{
     position: [number, number]
-    radius: number // meters
+    radius: number
     color: string
     fill: string
     label?: string
   }>
+  imageOverlays?: MapImageOverlay[]
 }
 
-export function MapView({ center, zoom, layers, markers, circles }: MapViewProps) {
+export function MapView({ center, zoom, layers, markers, circles, imageOverlays }: MapViewProps) {
   const [modules, setModules] = useState<LeafletMapModules | null>(null)
 
   useEffect(() => {
@@ -44,6 +53,7 @@ export function MapView({ center, zoom, layers, markers, circles }: MapViewProps
         L: L.default,
         MapContainer: RL.MapContainer,
         TileLayer: RL.TileLayer,
+        ImageOverlay: RL.ImageOverlay,
         Marker: RL.Marker,
         Popup: RL.Popup,
         CircleMarker: RL.CircleMarker,
@@ -53,14 +63,22 @@ export function MapView({ center, zoom, layers, markers, circles }: MapViewProps
 
   if (!modules) return <div className="h-full w-full bg-muted/30" />
 
-  const { L, MapContainer, TileLayer, Marker, Popup, CircleMarker } = modules
+  const { L, MapContainer, TileLayer, ImageOverlay, Marker, Popup, CircleMarker } = modules
 
   return (
     <MapContainer center={center} zoom={zoom} minZoom={2} maxZoom={18} className="h-full w-full">
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OSM" />
+      {imageOverlays?.map((ov, idx) => (
+        <ImageOverlay
+          key={`${ov.url}-${idx}`}
+          url={ov.url}
+          bounds={ov.bounds}
+          opacity={ov.opacity ?? 0.65}
+        />
+      ))}
       {layers.map((l) => (
         <div key={l.id} className="absolute top-3 left-3 z-20 flex flex-col gap-1 pointer-events-none">
-          <span className="text-[10px] font-bold tracking-wider bg-white/90 px-2 py-0.5 rounded shadow-sm uppercase opacity-80">
+          <span className="text-[10px] font-bold tracking-wider bg-white/90 text-slate-900 px-2 py-0.5 rounded shadow-sm uppercase opacity-90">
             {l.name}
           </span>
         </div>

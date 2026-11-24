@@ -16,10 +16,13 @@ export function ParetoChart({ points, highlighted, className }: ParetoChartProps
   const plotW = width - pad - 20
   const plotH = height - 40
 
-  if (points.length === 0) return null
+  const validPoints = points.filter(
+    (p) => typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y)
+  )
+  if (validPoints.length === 0) return null
 
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
+  const xs = validPoints.map((p) => p.x)
+  const ys = validPoints.map((p) => p.y)
   const xMin = Math.min(...xs)
   const xMax = Math.max(...xs)
   const yMin = Math.min(...ys)
@@ -27,8 +30,9 @@ export function ParetoChart({ points, highlighted, className }: ParetoChartProps
   const xRange = xMax - xMin || 1
   const yRange = yMax - yMin || 1
 
-  const scaleX = (x: number) => pad + ((x - xMin) / xRange) * plotW
-  const scaleY = (y: number) => height - 20 - ((y - yMin) / yRange) * plotH
+  const safeNum = (v: number, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? v : fallback)
+  const scaleX = (x: number) => pad + ((safeNum(x, xMin) - xMin) / xRange) * plotW
+  const scaleY = (y: number) => height - 20 - ((safeNum(y, yMin) - yMin) / yRange) * plotH
 
   const sorted = [...points].sort((a, b) => a.x - b.x)
   const frontier: ParetoPoint[] = []
@@ -51,7 +55,7 @@ export function ParetoChart({ points, highlighted, className }: ParetoChartProps
       <div className="text-[10px] text-muted-foreground mb-2">Pareto frontier (cost vs NPV saved)</div>
       <svg width={width} height={height} className="text-muted-foreground">
         <path d={lineD} fill="none" stroke="#2563eb" strokeWidth={2} strokeDasharray="6 4" />
-        {points.map((p) => (
+        {validPoints.map((p) => (
           <circle key={p.portfolioId} cx={scaleX(p.x)} cy={scaleY(p.y)} r={4} fill="#94a3b8" stroke="#ffffff" strokeWidth={2} />
         ))}
         <line x1={pad} y1={scaleY(yMin)} x2={scaleX(xMax)} y2={scaleY(yMin)} stroke="#e2e8f0" strokeWidth={1} />
@@ -95,8 +99,8 @@ export function DecisionMatrix({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((p) => (
-            <tr key={p.id} className="border-b border-border hover:bg-muted/50 transition-colors cursor-pointer">
+          {sorted.map((p, idx) => (
+            <tr key={p.portfolioId ?? p.id ?? String(idx)} className="border-b border-border hover:bg-muted/50 transition-colors cursor-pointer">
               <td className="py-1.5 text-xs font-medium truncate max-w-[140px]">{p.name}</td>
               <td className="py-1.5 text-xs text-right font-mono">{p.npvSavedUSD.toLocaleString()}</td>
               <td className="py-1.5 text-xs text-right font-mono">{p.interventionCostUSD.toLocaleString()}</td>
