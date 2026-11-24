@@ -155,12 +155,40 @@ export interface ScenarioComparison {
   createdAt: string
 }
 
+export interface InferenceRun {
+  id: string
+  pathosystem: Pathosystem
+  method: "ABC-SMC" | "Stan"
+  parameterNames: string[]
+  posteriorSamples: number[][]
+  acceptanceRate: number
+  generations: number
+  tolerance: number
+  timestamp: string
+  orgId: string
+  observationsCount: number
+}
+
+export interface UncertaintyField {
+  id: string
+  pathosystem: Pathosystem
+  method: "kriging" | "idw" | "kernel"
+  confidence: number
+  bounds: [[number, number], [number, number]]
+  mean: number[][]
+  variance: number[][]
+  confidenceInterval: { lower: number[][]; upper: number[][] }
+  createdAt: string
+  orgId: string
+}
+
 /* ---------- Field observatory ingestion schema ---------- */
 
 export type DiagnosticStatus = "Susceptible" | "Exposed" | "Infectious" | "Removed"
 export type HostCrop = "cassava" | "banana" | "plantain" | "other"
 
 export interface FieldRecord {
+  id?: string // server-assigned; defaults to sample_id when absent
   sample_id: string
   latitude: number
   longitude: number

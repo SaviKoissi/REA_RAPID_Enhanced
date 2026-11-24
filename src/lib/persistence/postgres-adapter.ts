@@ -1,12 +1,15 @@
 import { PersistenceAdapter } from "./adapter"
 import type {
   DashboardEntry,
-  User,
-  Organisation,
   FileEntry,
   FileVersion,
-  FieldRecord,
   FieldIngestionResult,
+  FieldRecord,
+  InferenceRun,
+  Organisation,
+  ScenarioResult,
+  UncertaintyField,
+  User,
 } from "@/types"
 import { Pool } from "pg"
 import Redis from "ioredis"
@@ -334,6 +337,33 @@ export class PostgresAdapter implements PersistenceAdapter {
       accepted_count: accepted.length,
       rejected_count: rejected.length,
     }
+  }
+
+  // ---- KVP-style registry stubs (PostgresAdapter not used by default factory) ----
+  async saveDashboard(entry: DashboardEntry): Promise<void> {
+    // No-op stub; default factory uses KVAdapter which persists to .data/rapid-kv-store.json
+    return
+  }
+  async saveObservations(records: FieldRecord[]): Promise<void> {
+    return
+  }
+  async listInferenceRuns(orgId?: string): Promise<InferenceRun[]> {
+    return []
+  }
+  async saveInferenceRun(run: InferenceRun): Promise<void> {
+    return
+  }
+  async listScenarios(orgId?: string): Promise<ScenarioResult[]> {
+    return []
+  }
+  async saveScenario(scenario: ScenarioResult): Promise<void> {
+    return
+  }
+  async listUncertaintyFields(orgId?: string): Promise<UncertaintyField[]> {
+    return []
+  }
+  async saveUncertaintyField(field: UncertaintyField): Promise<void> {
+    return
   }
 }
 

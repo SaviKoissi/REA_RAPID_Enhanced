@@ -6,6 +6,9 @@ import type {
   FileVersion,
   FieldRecord,
   FieldIngestionResult,
+  InferenceRun,
+  ScenarioResult,
+  UncertaintyField,
 } from "@/types"
 
 export interface PersistenceAdapter {
@@ -15,6 +18,7 @@ export interface PersistenceAdapter {
   createDashboard(entry: Omit<DashboardEntry, "key" | "createdAt" | "updatedAt">): Promise<DashboardEntry>
   updateDashboard(key: string, patch: Partial<DashboardEntry>): Promise<DashboardEntry>
   deleteDashboard(key: string): Promise<void>
+  saveDashboard(entry: DashboardEntry): Promise<void>
   // Users / auth
   getUserByEmail(email: string): Promise<User | null>
   getUser(id: string): Promise<User | null>
@@ -32,7 +36,15 @@ export interface PersistenceAdapter {
   getFileVersions(fileId: string): Promise<FileVersion[]>
   // Field observatory records
   listObservations(orgId?: string): Promise<FieldRecord[]>
+  saveObservations(records: FieldRecord[]): Promise<void>
   createObservation(record: Omit<FieldRecord, "geometry">): Promise<FieldRecord>
   ingestObservations(records: Array<Omit<FieldRecord, "geometry">>): Promise<FieldIngestionResult>
+  // Inference / scenario / uncertainty
+  listInferenceRuns(orgId?: string): Promise<InferenceRun[]>
+  saveInferenceRun(run: InferenceRun): Promise<void>
+  listScenarios(orgId?: string): Promise<ScenarioResult[]>
+  saveScenario(scenario: ScenarioResult): Promise<void>
+  listUncertaintyFields(orgId?: string): Promise<UncertaintyField[]>
+  saveUncertaintyField(field: UncertaintyField): Promise<void>
   health(): Promise<boolean>
 }
